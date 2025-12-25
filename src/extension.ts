@@ -9,6 +9,40 @@ const highlightDecorationType = vscode.window.createTextEditorDecorationType({
 	isWholeLine: true // Ensures the entire line background is colored
 });
 
+function getDeviceAddress(): string {
+	const editor = vscode.window.activeTextEditor;
+	if (editor) {
+		const document = editor.document;
+		const text = document.getText();
+		const match = text.match(/#deviceAddress:(.*)/)
+		if (match) {
+			return match[1]
+		}
+	}
+	let deviceConfig = vscode.workspace.getConfiguration('device');
+	return deviceConfig.get<string>('address')!
+}
+
+function getUploadPath(): string | undefined {
+	const editor = vscode.window.activeTextEditor;
+	if (!editor) {
+		return undefined
+	}
+	const document = editor.document;
+	const text = document.getText();
+	const match = text.match(/#uploadPath:(.*)/)
+	if (match) {
+		return match[1]
+	}
+
+	const fileUri = document.uri;
+	const filePath = fileUri.fsPath;
+	const workspaceFolder = vscode.workspace.getWorkspaceFolder(fileUri);
+	const workspaceFolderPath = workspaceFolder!.uri.fsPath;
+	const relativePath = path.relative(workspaceFolderPath, filePath);
+	return '/' + relativePath.replace('\\', '/')
+}
+
 export function activate(context: vscode.ExtensionContext) {
 	let tasmotaOutput = vscode.window.createOutputChannel("Tasmote execute output");
 
@@ -41,8 +75,7 @@ export function activate(context: vscode.ExtensionContext) {
 		let deviceConfig = vscode.workspace.getConfiguration('device');
 		let outputpollong = deviceConfig.get<string>('outputPollong');
 		if (outputpollong) {
-			let deviceAddress = deviceConfig.get<string>('address');
-			const response = await axios.get(deviceAddress! + '/bc', {
+			const response = await axios.get(getDeviceAddress() + '/bc', {
 				params: {
 					c2: '0'
 				}
@@ -57,11 +90,8 @@ export function activate(context: vscode.ExtensionContext) {
 			editor.setDecorations(highlightDecorationType, []);
 			const document = editor.document;
 			const text = document.getText();
-
-			let deviceConfig = vscode.workspace.getConfiguration('device');
-			let deviceAddress = deviceConfig.get<string>('address');
 			try {
-				const response = await axios.get(deviceAddress! + '/bc', {
+				const response = await axios.get(getDeviceAddress() + '/bc', {
 					params: {
 						c2: '0',
 						c1: text
@@ -80,26 +110,19 @@ export function activate(context: vscode.ExtensionContext) {
 		if (editor) {
 			const document = editor.document;
 			const fileUri = document.uri;
-			const filePath = fileUri.fsPath;
-
-			const fileName = path.basename(filePath);
-
 			const workspaceFolder = vscode.workspace.getWorkspaceFolder(fileUri);
-
 			if (workspaceFolder) {
-				const workspaceFolderPath = workspaceFolder.uri.fsPath;
-				const relativePath = path.relative(workspaceFolderPath, filePath);
-
 				try {
 					let deviceConfig = vscode.workspace.getConfiguration('device');
-					let deviceAddress = deviceConfig.get<string>('address');
+					let deviceAddress = getDeviceAddress()
 					let resetVmAfterUpload = deviceConfig.get<boolean>('resetVmAfterUpload');
 					const bodyFormData = new FormData();
-					bodyFormData.append('name', '/' + relativePath.replace('\\', '/'));
+					const uploadPath = getUploadPath()
+					bodyFormData.append('name', uploadPath);
 					bodyFormData.append('content', document.getText());
 					vscode.window.showInformationMessage('Uploading');
 					const response = await axios.post(deviceAddress! + '/ufse', bodyFormData);
-					vscode.window.showInformationMessage('Uploaded');
+					vscode.window.showInformationMessage('Uploaded to: ' + uploadPath);
 					if (resetVmAfterUpload) {
 						const restartResponse = await axios.post(deviceAddress! + '/cm?cmnd=BrRestart%20')
 						vscode.window.showInformationMessage(`Tasmota Berry WM restart: ${JSON.stringify(restartResponse.data)}`);
